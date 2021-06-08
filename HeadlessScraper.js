@@ -1,7 +1,6 @@
 const puppeteer = require("puppeteer");
 const main = async () => {
   const browser = await puppeteer.launch({
-    headless: false,
     args: ["--proxy-server=socks5://127.0.0.1:9050"],
   });
   let link = "http://nzxj65x32vh2fkhk.onion/all";
