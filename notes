@@ -1,0 +1,6 @@
+Wasnt able to make page.exposeFunction work, there fore forcing me to declare the normilazation functions inside the evaluation function.
+Will become a problem when refactoring/making a library
+
+wasnt able to make axios work with the proxy, must ask danks or ilay about it
+
+stop scraping in the middle? or when finished, only add new scrapes?
