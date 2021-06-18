@@ -1,7 +1,8 @@
+//make everything immutable my god
 const cheerio = require("cheerio");
 const tr = require("tor-request");
 const mongoose = require("mongoose");
-const { Post } = require("./MongooseInit");
+const { Post } = require("./models/Post");
 let link = "http://nzxj65x32vh2fkhk.onion/all";
 
 function requestPromise(link) {
@@ -12,7 +13,7 @@ function requestPromise(link) {
     });
   });
 }
-function convertMonthAbbr(abbr) {
+function convertMonthAbbr(abbr, num) {
   // sep might be sep, figured if sept includes sept thered be no need for complicated logic
   const months = [
     "Jan",
@@ -62,64 +63,98 @@ async function nextPage(link) {
     .attr();
   return href;
 }
-
+async function mongooseConnect() {
+  try {
+    mongoose.connect("mongodb://localhost:27017/", {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      useFindAndModify: false,
+      useCreateIndex: true,
+    });
+    console.log("MongoDB Connected");
+  } catch (e) {
+    console.log(e.message);
+  }
+}
 async function main(link) {
-  let reachedNewest = false;
-  const [newestEntry] = await Post.find()
-    .sort({ date: -1 })
-    .limit(1)
-    .exec();
-  const checkReachedNewest = async (date) => {
+  await mongooseConnect();
+  try {
     const [newestEntry] = await Post.find()
       .sort({ date: -1 })
       .limit(1)
       .exec();
-    if (date.getTime() < newestEntry.date.getTime())
-      reachedNewest = true;
-  };
-  const postsToFilter = [];
+    if (!newestEntry) {
+      const posts = [];
 
-  while (link && reachedNewest === false) {
-    postsToFilter.push(await scrape(link, checkReachedNewest));
-    link = await nextPage(link);
+      while (link) {
+        posts.push(...(await scrape(link)));
+        link = await nextPage(link);
+      }
+      console.log(posts);
+      await Post.insertMany(posts);
+      await mongoose.connection.close();
+      return;
+    }
+    let reachedNewest = false;
+    const checkReachedNewest = async (date) => {
+      if (date.getTime() < newestEntry.date.getTime())
+        reachedNewest = true;
+    };
+    const postsToFilter = [];
+
+    while (link && reachedNewest === false) {
+      postsToFilter.push(await scrape(link, checkReachedNewest));
+      link = await nextPage(link);
+    }
+
+    const newestPosts = postsToFilter.filter(
+      (post) =>
+        new Date(post.date).getTime() >
+        new Date(newestEntry.date).getTime()
+    );
+    console.log(newestPosts);
+    if (newestPosts.length !== 0) await Post.insertMany(newestPosts);
+    await mongoose.connection.close();
+  } catch (e) {
+    console.log(e.message);
   }
-
-  console.log(postsToFilter);
-  const newestPosts = postsToFilter.filter(
-    (post) =>
-      new Date(post.date).getTime() >
-      new Date(newestEntry.date).getTime()
-  );
-  await Post.insertMany(newestPosts);
-  await mongoose.connection.close();
 }
 
 async function scrape(link, checkReachedNewest) {
   const response = await requestPromise(link);
   const $ = cheerio.load(response.body);
   const posts = $(".col-sm-12 .btn.btn-success");
-  return await posts.get().map(async (post) => {
-    if (post.attribs.href) {
-      const response = await requestPromise(post.attribs.href);
-      const $ = cheerio.load(response.body);
-      const title = $("h4")
-        .first()
-        .text()
-        .replace(/\s\s+/g, " ")
-        .trim();
-      const content = $(".well.well-sm.well-white.pre")
-        .text()
-        .trim()
-        .replace(/\n/g, "");
-      const { author, date } = authorAndDate(
-        $(".col-sm-6")
+  return await Promise.all(
+    posts.get().map(async (post) => {
+      if (post.attribs.href) {
+        const response = await requestPromise(post.attribs.href);
+        const $ = cheerio.load(response.body);
+        const title = $("h4")
+          .first()
+          .text()
+          .replace(/\s\s+/g, " ")
+          .trim();
+        const content = $(".well.well-sm.well-white.pre")
           .text()
           .trim()
-          .match(/^(.*)$/m)[0]
-      );
-      checkReachedNewest(date);
-      return { title, content, author, date };
-    }
-  });
+          .replace(/\n/g, "");
+        const { author, date } = authorAndDate(
+          $(".col-sm-6")
+            .text()
+            .trim()
+            .match(/^(.*)$/m)[0]
+        );
+        if (checkReachedNewest) await checkReachedNewest(date);
+        return { title, post: content, author, date };
+      }
+    })
+  );
 }
-main(link);
+
+async function wrapperFunction() {
+  await main(link);
+  setInterval(async () => {
+    await main(link);
+  }, 120000);
+}
+wrapperFunction();

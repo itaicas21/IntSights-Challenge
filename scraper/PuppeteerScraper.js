@@ -1,7 +1,20 @@
 const puppeteer = require("puppeteer");
 const mongoose = require("mongoose");
-const { Post } = require("./MongooseInit");
+const { Post } = require("./models/Post");
 
+async function mongooseConnect() {
+  try {
+    mongoose.connect("mongodb://localhost:27017/", {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      useFindAndModify: false,
+      useCreateIndex: true,
+    });
+    console.log("MongoDB Connected");
+  } catch (e) {
+    console.log(e.message);
+  }
+}
 function authorAndDate(string) {
   const arrayOfStrings = string.split(" ");
   const length = arrayOfStrings.length;
@@ -42,26 +55,36 @@ function convertMonthAbbr(abbr) {
   return indexof + 1 < 10 ? `0${indexof + 1}` : `${indexof + 1}`;
 }
 async function main() {
+  await mongooseConnect();
   let link = "http://nzxj65x32vh2fkhk.onion/all";
   let reachedNewest = false;
-  const posts = [];
+  const postsToFilter = [];
 
   const setReachedNewest = () => {
     reachedNewest = true;
   };
-
-  const [newestEntry] = await Post.find()
-    .sort({ date: -1 })
-    .limit(1)
-    .exec();
-
   const browser = await puppeteer.launch({
     headless: false,
     args: ["--proxy-server=socks5://127.0.0.1:9050"],
   });
+  const [newestEntry] = await Post.find()
+    .sort({ date: -1 })
+    .limit(1)
+    .exec();
+  if (!newestEntry) {
+    const posts = [];
+    while (link) {
+      posts.push(...(await scrape(browser, link)));
+      link = await nextPage(browser, link);
+    }
+    console.log(posts);
+    await Post.insertMany(posts);
+    await mongoose.connection.close();
+    return browser.close();
+  }
 
   while (link && reachedNewest === false) {
-    posts.push(
+    postsToFilter.push(
       ...(await scrape(
         browser,
         link,
@@ -72,7 +95,7 @@ async function main() {
     link = await nextPage(browser, link);
   }
 
-  const newestPosts = posts.filter(
+  const newestPosts = postsToFilter.filter(
     (post) =>
       new Date(post.date).getTime() >
       new Date(newestEntry.date).getTime()
@@ -130,7 +153,11 @@ async function scrape(
     {
       Object.assign(post, { ...authorAndDate(post.temp) });
       const { temp, ...rest } = post;
-      if (rest.date.getTime() < newestEntryDate.getTime())
+      if (
+        newestEntryDate &&
+        setReachedNewest &&
+        rest.date.getTime() < newestEntryDate.getTime()
+      )
         setReachedNewest();
       return rest;
     }

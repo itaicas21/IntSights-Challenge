@@ -1,2 +1,4 @@
-
+/scraper/node_modules
 /scraperDb
+/.vscode
+docker-compose.debug.yml
