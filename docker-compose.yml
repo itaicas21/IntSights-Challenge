@@ -1,12 +1,17 @@
-version: '3.4'
+version: "3.4"
 
 services:
-  intsightschallenge:
-    image: intsightschallenge
+  scraper:
     build:
-      context: backend
+      context: scraper
       dockerfile: ./Dockerfile
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
     ports:
       - 3000:3000
+  mondodb:
+    image: mongo
+    ports:
+      - 27017:27017
+  tor-proxy:
+    image: dperson/torproxy
